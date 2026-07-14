@@ -2,9 +2,9 @@
 provider_client.py — pulls data FROM DataSupportTool's read-only provider API
 and optionally imports it into RojBot's local dataset registry.
 
-Env vars required:
-  PROVIDER_BASE_URL  — e.g. http://datasupporttool:8000
-  PROVIDER_API_KEY   — shared secret from DataSupportTool's .env
+Connection settings (endpoint + shared API key) are configured from the
+Settings page and stored in the DB — see backend/core/settings.py. They fall
+back to PROVIDER_BASE_URL / PROVIDER_API_KEY env vars if not set there.
 """
 from __future__ import annotations
 import asyncio
@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_db
+from backend.core.settings import get_provider_api_key, get_provider_base_url
 from backend.db.models import Dataset
 
 router = APIRouter(prefix="/api/provider", tags=["provider"])
@@ -25,24 +26,24 @@ DATASETS_DIR = os.getenv("DATASETS_DIR", "./datasets")
 os.makedirs(DATASETS_DIR, exist_ok=True)
 
 
-def _base_url() -> str:
-    url = os.getenv("PROVIDER_BASE_URL", "").rstrip("/")
+def _base_url(db: Session) -> str:
+    url = get_provider_base_url(db)
     if not url:
-        raise HTTPException(status_code=503, detail="PROVIDER_BASE_URL is not configured")
+        raise HTTPException(status_code=503, detail="Provider endpoint is not configured — set it on the Settings page")
     return url
 
 
-def _api_key() -> str:
-    key = os.getenv("PROVIDER_API_KEY", "")
+def _api_key(db: Session) -> str:
+    key = get_provider_api_key(db)
     if not key:
-        raise HTTPException(status_code=503, detail="PROVIDER_API_KEY is not configured")
+        raise HTTPException(status_code=503, detail="Provider API key is not configured — generate one on the Settings page")
     return key
 
 
-def _client() -> httpx.AsyncClient:
+def _client(db: Session) -> httpx.AsyncClient:
     return httpx.AsyncClient(
-        base_url=_base_url(),
-        headers={"X-API-Key": _api_key()},
+        base_url=_base_url(db),
+        headers={"X-API-Key": _api_key(db)},
         timeout=60.0,
     )
 
@@ -60,8 +61,8 @@ def _check(r: httpx.Response) -> None:
 # ── Discovery ──────────────────────────────────────────────────────────────────
 
 @router.get("/datasets", summary="List all datasets available on DataSupportTool")
-async def list_provider_datasets():
-    async with _client() as c:
+async def list_provider_datasets(db: Session = Depends(get_db)):
+    async with _client(db) as c:
         r = await c.get("/api/provider/datasets")
     _check(r)
     return r.json()
@@ -73,8 +74,9 @@ async def list_provider_datasets():
 async def proxy_text_export(
     dataset_id: int,
     format: Literal["alpaca", "gemma", "sharegpt"] = Query("sharegpt"),
+    db: Session = Depends(get_db),
 ):
-    async with _client() as c:
+    async with _client(db) as c:
         r = await c.get(f"/api/provider/text/{dataset_id}/export", params={"format": format})
     _check(r)
     return r.json()
@@ -86,7 +88,7 @@ async def import_text_dataset(
     format: Literal["alpaca", "sharegpt"] = Query("sharegpt"),
     db: Session = Depends(get_db),
 ):
-    async with _client() as c:
+    async with _client(db) as c:
         r = await c.get(f"/api/provider/text/{dataset_id}/export", params={"format": format})
     _check(r)
     payload = r.json()
@@ -135,16 +137,16 @@ async def import_text_dataset(
 # ── ASR dataset ────────────────────────────────────────────────────────────────
 
 @router.get("/asr/{dataset_id}/export", summary="Proxy an ASR export from DataSupportTool (no import)")
-async def proxy_asr_export(dataset_id: int):
-    async with _client() as c:
+async def proxy_asr_export(dataset_id: int, db: Session = Depends(get_db)):
+    async with _client(db) as c:
         r = await c.get(f"/api/provider/asr/{dataset_id}/export")
     _check(r)
     return r.json()
 
 
 @router.get("/asr/files/{file_id}/audio", summary="Proxy audio bytes for a specific ASR file")
-async def proxy_audio_file(file_id: int):
-    async with _client() as c:
+async def proxy_audio_file(file_id: int, db: Session = Depends(get_db)):
+    async with _client(db) as c:
         r = await c.get(f"/api/provider/asr/files/{file_id}/audio")
     _check(r)
     content_type = r.headers.get("content-type", "audio/wav")
@@ -153,7 +155,7 @@ async def proxy_audio_file(file_id: int):
 
 @router.post("/asr/{dataset_id}/import", summary="Pull an ASR dataset from DataSupportTool and register it locally")
 async def import_asr_dataset(dataset_id: int, db: Session = Depends(get_db)):
-    async with _client() as c:
+    async with _client(db) as c:
         r = await c.get(f"/api/provider/asr/{dataset_id}/export")
     _check(r)
     payload = r.json()
@@ -206,8 +208,8 @@ async def import_asr_dataset(dataset_id: int, db: Session = Depends(get_db)):
 # ── BR Pipeline (read-only proxy — not for training input) ────────────────────
 
 @router.get("/br-pipeline/{pipeline_run_id}/export", summary="Proxy a BR pipeline export (DataSupportTool's own Stage-5 outputs)")
-async def proxy_br_pipeline_export(pipeline_run_id: int):
-    async with _client() as c:
+async def proxy_br_pipeline_export(pipeline_run_id: int, db: Session = Depends(get_db)):
+    async with _client(db) as c:
         r = await c.get(f"/api/provider/br-pipeline/{pipeline_run_id}/export")
     _check(r)
     return r.json()

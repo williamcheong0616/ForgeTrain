@@ -22,14 +22,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_db
+from backend.core.settings import get_provider_api_key, get_provider_base_url
 from backend.db.models import ModelEntry
 
 router = APIRouter(prefix="/api/inference", tags=["inference"])
 
 EXPORTS_DIR = os.getenv("EXPORTS_DIR", "./exports")
-
-_PROVIDER_BASE = lambda: os.getenv("PROVIDER_BASE_URL", "").rstrip("/")
-_PROVIDER_KEY  = lambda: os.getenv("PROVIDER_API_KEY", "")
 
 # ── Singleton model state ──────────────────────────────────────────────────────
 
@@ -314,16 +312,16 @@ def _fill_record(rec: dict, fmt: str, output: str) -> dict:
     "/fill-dataset",
     summary="Pull a text dataset from DataSupportTool and fill the output field using the loaded model",
 )
-async def fill_dataset(body: FillDatasetRequest):
+async def fill_dataset(body: FillDatasetRequest, db: Session = Depends(get_db)):
     if body.format not in ("alpaca", "sharegpt"):
         raise HTTPException(status_code=422, detail="format must be 'alpaca' or 'sharegpt'")
 
     _assert_ready()
 
-    base = _PROVIDER_BASE()
-    key  = _PROVIDER_KEY()
+    base = get_provider_base_url(db)
+    key  = get_provider_api_key(db)
     if not base or not key:
-        raise HTTPException(status_code=503, detail="PROVIDER_BASE_URL / PROVIDER_API_KEY not configured")
+        raise HTTPException(status_code=503, detail="Provider endpoint / API key not configured — set them on the Settings page")
 
     async with httpx.AsyncClient(base_url=base, headers={"X-API-Key": key}, timeout=60.0) as c:
         r = await c.get(f"/api/provider/text/{body.dataset_id}/export", params={"format": body.format})

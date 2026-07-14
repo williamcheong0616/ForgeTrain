@@ -117,3 +117,11 @@ export const createASRJob = (body: {
   config: Record<string, unknown>;
 }) => http.post<Job>("/asr/jobs", body).then((r) => r.data);
 export const cancelASRJob = (id: number) => http.delete(`/asr/jobs/${id}`);
+
+// Settings
+export interface ProviderSettings { base_url: string; api_key: string; configured: boolean; }
+export const getProviderSettings = () => http.get<ProviderSettings>("/settings/provider").then((r) => r.data);
+export const updateProviderSettings = (body: { base_url?: string; api_key?: string }) =>
+  http.put<ProviderSettings>("/settings/provider", body).then((r) => r.data);
+export const generateProviderKey = () =>
+  http.post<ProviderSettings>("/settings/provider/generate-key").then((r) => r.data);

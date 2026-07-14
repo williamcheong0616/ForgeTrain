@@ -17,6 +17,7 @@ const TABS = [
   { href: "/jobs",      label: "Jobs" },
   { href: "/models",    label: "Models" },
   { href: "/datasets",  label: "Datasets" },
+  { href: "/settings",  label: "Settings" },
 ];
 
 function utilColor(pct: number): string {

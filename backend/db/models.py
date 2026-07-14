@@ -132,3 +132,11 @@ class PromptProfile(Base):
     system_prompt = Column(Text, nullable=True)
     gen_params = Column(JSON, nullable=True)
     created_at = Column(TZDateTime, default=now_utc)
+
+
+class Setting(Base):
+    __tablename__ = "settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=True)
+    updated_at = Column(TZDateTime, default=now_utc, onupdate=now_utc)
